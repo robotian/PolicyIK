@@ -23,6 +23,7 @@ PolicyIK is a goal-conditioned reinforcement learning policy for high-precision 
 - [Project Structure](#project-structure)
 - [Simulation](#simulation)
   - [Installation](#installation)
+  - [Isaac Sim 6.2](#isaac-sim-62)
   - [Data and Checkpoints](#data-and-checkpoints)
   - [Quick Start](#quick-start)
   - [Training](#training)
@@ -63,7 +64,7 @@ conda activate policyik
 bash install.sh
 ```
 
-`install.sh` sets up Isaac Sim 6.2 and Isaac Lab 3.0, and patches `openarm_isaac_lab` for Isaac Lab 3 (`patches/`). The released checkpoints were trained on Isaac Sim 5.1 and Isaac Lab 2.3. Isaac Lab 3 orders quaternions (x, y, z, w), but the data files and evaluation outputs keep (w, x, y, z).
+`install.sh` installs Isaac Sim 6.2 and Isaac Lab 3.0 (see [Isaac Sim 6.2](#isaac-sim-62)).
 
 Or with Docker (needs the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)), from the repository root:
 
@@ -76,6 +77,30 @@ The container starts in `simulation/` and writes `logs/` and `outputs/` to the h
 
 > [!NOTE]
 > The scripts set `OMNI_KIT_ACCEPT_EULA=YES`, which accepts the [NVIDIA Omniverse license](https://docs.omniverse.nvidia.com/install-guide/latest/common/NVIDIA_Omniverse_License_Agreement.html) of Isaac Sim.
+
+### Isaac Sim 6.2
+
+The simulation code runs on Isaac Sim 6.2 and Isaac Lab 3.0. The paper's results and the released checkpoints come from Isaac Sim 5.1 and Isaac Lab 2.3. That version of the code is commit `22f3a5c`.
+
+**Requirements.** You need Python 3.12, an NVIDIA GPU with driver 570.169 or newer, and glibc 2.35 or newer (Ubuntu 22.04 or later). We tested on an RTX 4080 SUPER with driver 595.99, in the Docker image (Ubuntu 24.04).
+
+**Results.** On Isaac Sim 6.2, the released checkpoint matches its Isaac Sim 5.1 results, and a policy trained from scratch reaches the same success rate (seed 1, 4,120 evaluation tasks, strict success):
+
+| Policy | Simulator | Single attempt | Deployment protocol |
+|---|---|---|---|
+| `checkpoints/policyik_s1.pth` | Isaac Sim 5.1 | 93.50% | 98.96% |
+| `checkpoints/policyik_s1.pth` | Isaac Sim 6.2 | 93.42% | 98.93% |
+| trained with `scripts/train.sh 1` | Isaac Sim 6.2 | 93.35% | 98.91% |
+
+Training one seed takes about 1.5 hours on the RTX 4080 SUPER.
+
+**Differences from Isaac Sim 5.1:**
+
+- **Quaternions:** Isaac Lab 3 orders quaternions (x, y, z, w). The data files and evaluation outputs keep (w, x, y, z). `evaluate.py` and the goal sampler convert between the two.
+- **Physics:** the task runs on Isaac Sim's PhysX with `enable_external_forces_every_iteration=False`, the Isaac Lab 2 default. Isaac Lab 3 changed this default to `True`. With `True`, the released policies stop about 4 mm short of their goals and reach no task within 1 mm.
+- **OpenArm task:** `openarm_isaac_lab` stays at the commit we used. `install.sh` applies `patches/openarm_isaac_lab_isaaclab3.patch` to move its reach task to Isaac Lab 3.
+- **Headless runs:** Isaac Lab 3 runs headless by default and has no `--headless` flag.
+- **Startup crashes:** Isaac Sim 6.2 occasionally segfaults while it starts, and its crash handler can then hang. `train.sh` and `evaluate.sh` give each run a time limit and three tries.
 
 ### Data and Checkpoints
 
