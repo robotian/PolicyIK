@@ -58,10 +58,21 @@ In simulation, we train PolicyIK with PPO in Isaac Lab and evaluate it on 4,120 
 ```bash
 git clone https://github.com/Tinaliu0123/PolicyIK.git
 cd PolicyIK/simulation
-conda create -n policyik python=3.11
+conda create -n policyik python=3.12
 conda activate policyik
 bash install.sh
 ```
+
+`install.sh` sets up Isaac Sim 6.2 and Isaac Lab 3.0, and patches `openarm_isaac_lab` for Isaac Lab 3 (`patches/`). The released checkpoints were trained on Isaac Sim 5.1 and Isaac Lab 2.3. Isaac Lab 3 orders quaternions (x, y, z, w), but the data files and evaluation outputs keep (w, x, y, z).
+
+Or with Docker (needs the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)), from the repository root:
+
+```bash
+docker compose build
+docker compose run --rm sim bash scripts/evaluate.sh 1 checkpoints/policyik_s1.pth
+```
+
+The container starts in `simulation/` and writes `logs/` and `outputs/` to the host. To watch training, run `docker compose up -d tensorboard` and open http://localhost:6006. After you edit the code, run `docker compose build` again. Only the code layer is rebuilt.
 
 > [!NOTE]
 > The scripts set `OMNI_KIT_ACCEPT_EULA=YES`, which accepts the [NVIDIA Omniverse license](https://docs.omniverse.nvidia.com/install-guide/latest/common/NVIDIA_Omniverse_License_Agreement.html) of Isaac Sim.
@@ -92,7 +103,7 @@ This evaluates a released policy with a single attempt and with the deployment p
 bash scripts/train.sh 1
 ```
 
-This trains a policy for 13,000 PPO epochs and averages its last 20 checkpoints with exponential weights into `logs/rl_games/policyik_s1/checkpoint_average.pth`.
+This trains a policy for 13,000 PPO epochs and averages its last 20 checkpoints with exponential weights into `logs/rl_games/policyik_s1/checkpoint_average.pth`. Training runs in three segments. If a run stops, run the same command again to resume. It skips the segments that already finished.
 
 ### Evaluation
 

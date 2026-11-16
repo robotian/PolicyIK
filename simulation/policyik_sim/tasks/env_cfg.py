@@ -9,6 +9,7 @@ from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
+from isaaclab_physx.physics import PhysxCfg
 
 from openarm.tasks.manager_based.openarm_manipulation.unimanual.reach.config.joint_pos_env_cfg import (
     OpenArmReachEnvCfg,
@@ -27,6 +28,9 @@ SOURCE_SET = "data/source_set.npz"               # evaluation environment (start
 def _configure(cfg, start_pool: str, goal_pool: str, train: bool) -> None:
     ee = cfg.rewards.end_effector_position_tracking.params["asset_cfg"]   # end-effector body (openarm_hand)
     cmd = "ee_pose"
+    # Isaac Sim's PhysX (the Isaac Lab 2 engine); Isaac Lab 3's automatic choice could run kitless on OvPhysX.
+    # Isaac Lab 3 flipped this TGS default to True; Isaac Lab 2's False is what the policy was trained with.
+    cfg.sim.physics = PhysxCfg(enable_external_forces_every_iteration=False)
 
     # start and goal sampling
     base = cfg.commands.ee_pose

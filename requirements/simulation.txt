@@ -1,2 +1,3 @@
-numpy==1.26.0
-scipy==1.15.3
+scipy==1.17.0  # the exact version Isaac Sim 6.2 requires
+moviepy==1.0.3  # Isaac Lab 3's video recorder needs moviepy<2
+# numpy comes from Isaac Lab 3, which requires numpy>=2

@@ -30,11 +30,13 @@ def reset_joints_from_pool(env, env_ids: torch.Tensor, pool_npz: str,
         _CACHE[akey] = list(arm_ids)
     q_pool = _CACHE[qkey]
     arm_ids = _CACHE[akey]
+    if isinstance(env_ids, slice):   # Isaac Lab 3 passes slice(None) for all environments
+        env_ids = torch.arange(env.num_envs, device=env.device)[env_ids]
     n = env_ids.shape[0] if torch.is_tensor(env_ids) else len(env_ids)
     idx = torch.randint(0, q_pool.shape[0], (n,), device=env.device)
     joint_pos = q_pool[idx]
     joint_vel = torch.zeros_like(joint_pos)
-    asset.write_joint_state_to_sim(joint_pos, joint_vel, joint_ids=arm_ids, env_ids=env_ids)
+    asset.write_joint_state_to_sim_index(position=joint_pos, velocity=joint_vel, joint_ids=arm_ids, env_ids=env_ids)
 
 
 class PoolPoseCommand(UniformPoseCommand):
@@ -46,11 +48,14 @@ class PoolPoseCommand(UniformPoseCommand):
     def __init__(self, cfg: "PoolPoseCommandCfg", env):
         super().__init__(cfg, env)
         pool = np.load(cfg.pool_npz)
-        self._pool_pos, self._pool_quat = pool["ee_pos"], pool["ee_quat"]
+        # pools store wxyz; Isaac Lab 3 commands are xyzw
+        self._pool_pos, self._pool_quat = pool["ee_pos"], pool["ee_quat"][:, [1, 2, 3, 0]]
         self._rng = np.random.default_rng(cfg.sampler_seed)
 
     def _resample_command(self, env_ids):
         super()._resample_command(env_ids)
+        if isinstance(env_ids, slice):   # Isaac Lab 3 passes slice(None) for all environments
+            env_ids = torch.arange(self.num_envs, device=self.device)[env_ids]
         rows = self._rng.integers(0, self._pool_pos.shape[0], size=len(env_ids))
         pos, quat = self._pool_pos[rows], self._pool_quat[rows]
         self.pose_command_b[env_ids, :3] = torch.as_tensor(pos, dtype=self.pose_command_b.dtype, device=self.device)

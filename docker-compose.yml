@@ -1,0 +1,23 @@
+services:
+  sim:
+    # host network: the default bridge got 403s from package mirrors on our machine
+    build: {context: ., network: host}
+    image: policyik-sim
+    gpus: all
+    # private /dev/shm instead of ipc: host, so the shared memory Kit leaves behind doesn't pile up on the host
+    shm_size: 8gb
+    network_mode: host
+    volumes:
+      - ./simulation/logs:/workspace/PolicyIK/simulation/logs
+      - ./simulation/outputs:/workspace/PolicyIK/simulation/outputs
+      - policyik-cache:/root/.cache  # Isaac Sim shader/kit caches; first launch is slow without it
+
+  tensorboard:  # training curves at http://localhost:6006 (localhost only)
+    image: policyik-sim
+    network_mode: host
+    volumes:
+      - ./simulation/logs:/workspace/PolicyIK/simulation/logs:ro
+    command: tensorboard --logdir logs/rl_games --port 6006
+
+volumes:
+  policyik-cache:

@@ -1,4 +1,4 @@
-"""PolicyIK tasks; importing this package after Isaac Sim starts registers them with gymnasium."""
+"""PolicyIK tasks; importing this package registers them with gymnasium (safe before Isaac Sim starts)."""
 
 import gymnasium as gym
 

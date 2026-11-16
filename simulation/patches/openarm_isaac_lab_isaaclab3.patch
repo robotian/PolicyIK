@@ -1,0 +1,57 @@
+diff --git a/source/openarm/openarm/tasks/manager_based/openarm_manipulation/unimanual/reach/mdp/rewards.py b/source/openarm/openarm/tasks/manager_based/openarm_manipulation/unimanual/reach/mdp/rewards.py
+index 217e2ad..e356ef5 100644
+--- a/source/openarm/openarm/tasks/manager_based/openarm_manipulation/unimanual/reach/mdp/rewards.py
++++ b/source/openarm/openarm/tasks/manager_based/openarm_manipulation/unimanual/reach/mdp/rewards.py
+@@ -37,8 +37,8 @@ def position_command_error(env: ManagerBasedRLEnv, command_name: str, asset_cfg:
+     command = env.command_manager.get_command(command_name)
+     # obtain the desired and current positions
+     des_pos_b = command[:, :3]
+-    des_pos_w, _ = combine_frame_transforms(asset.data.root_pos_w, asset.data.root_quat_w, des_pos_b)
+-    curr_pos_w = asset.data.body_pos_w[:, asset_cfg.body_ids[0]]  # type: ignore
++    des_pos_w, _ = combine_frame_transforms(asset.data.root_pos_w.torch, asset.data.root_quat_w.torch, des_pos_b)
++    curr_pos_w = asset.data.body_pos_w.torch[:, asset_cfg.body_ids[0]]  # type: ignore
+     return torch.norm(curr_pos_w - des_pos_w, dim=1)
+ 
+ 
+@@ -55,8 +55,8 @@ def position_command_error_tanh(
+     command = env.command_manager.get_command(command_name)
+     # obtain the desired and current positions
+     des_pos_b = command[:, :3]
+-    des_pos_w, _ = combine_frame_transforms(asset.data.root_pos_w, asset.data.root_quat_w, des_pos_b)
+-    curr_pos_w = asset.data.body_pos_w[:, asset_cfg.body_ids[0]]  # type: ignore
++    des_pos_w, _ = combine_frame_transforms(asset.data.root_pos_w.torch, asset.data.root_quat_w.torch, des_pos_b)
++    curr_pos_w = asset.data.body_pos_w.torch[:, asset_cfg.body_ids[0]]  # type: ignore
+     distance = torch.norm(curr_pos_w - des_pos_w, dim=1)
+     return 1 - torch.tanh(distance / std)
+ 
+@@ -73,6 +73,6 @@ def orientation_command_error(env: ManagerBasedRLEnv, command_name: str, asset_c
+     command = env.command_manager.get_command(command_name)
+     # obtain the desired and current orientations
+     des_quat_b = command[:, 3:7]
+-    des_quat_w = quat_mul(asset.data.root_quat_w, des_quat_b)
+-    curr_quat_w = asset.data.body_quat_w[:, asset_cfg.body_ids[0]]  # type: ignore
++    des_quat_w = quat_mul(asset.data.root_quat_w.torch, des_quat_b)
++    curr_quat_w = asset.data.body_quat_w.torch[:, asset_cfg.body_ids[0]]  # type: ignore
+     return quat_error_magnitude(curr_quat_w, des_quat_w)
+diff --git a/source/openarm/openarm/tasks/manager_based/openarm_manipulation/unimanual/reach/reach_env_cfg.py b/source/openarm/openarm/tasks/manager_based/openarm_manipulation/unimanual/reach/reach_env_cfg.py
+index e4fe67c..0a1a125 100644
+--- a/source/openarm/openarm/tasks/manager_based/openarm_manipulation/unimanual/reach/reach_env_cfg.py
++++ b/source/openarm/openarm/tasks/manager_based/openarm_manipulation/unimanual/reach/reach_env_cfg.py
+@@ -30,7 +30,7 @@ from isaaclab.managers import TerminationTermCfg as DoneTerm
+ from isaaclab.scene import InteractiveSceneCfg
+ from isaaclab.utils import configclass
+ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
+-from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
++from isaaclab.utils.noise import UniformNoiseCfg as Unoise  # Isaac Lab 3 dropped the AdditiveUniformNoiseCfg alias
+ 
+ from . import mdp
+ 
+@@ -58,7 +58,7 @@ class ReachSceneCfg(InteractiveSceneCfg):
+             usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/SeattleLabTable/table_instanceable.usd",
+         ),
+         init_state=AssetBaseCfg.InitialStateCfg(
+-            pos=(0.55, 0.0, 0.0), rot=(0.70711, 0.0, 0.0, 0.70711)
++            pos=(0.55, 0.0, 0.0), rot=(0.0, 0.0, 0.70711, 0.70711)  # xyzw (Isaac Lab 3)
+         ),
+     )
+ 

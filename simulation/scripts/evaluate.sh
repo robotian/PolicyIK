@@ -10,7 +10,10 @@ SEED="${1:?usage: scripts/evaluate.sh <seed> [checkpoint]}"
 CKPT="${2:-logs/rl_games/policyik_s$SEED/checkpoint_average.pth}"
 OUT="outputs/eval/s$SEED"
 mkdir -p "$OUT"
-EVAL=("$PYTHON" -m policyik_sim.evaluate --headless --checkpoint "$CKPT")
+# Isaac Sim 6.2 occasionally segfaults while starting right after another GPU-heavy run, and its crash handler can
+# then hang. Each run gets a time limit and up to three tries (an evaluation run has no side effects to undo).
+launch() { for try in 1 2 3; do timeout -k 30 1200 "$@" && return; echo "[evaluate.sh] run failed (try $try)" >&2; done; return 1; }
+EVAL=(launch "$PYTHON" -m policyik_sim.evaluate --checkpoint "$CKPT")
 
 "${EVAL[@]}" --task_file data/eval_tasks.npz --output "$OUT/single.npz"
 "$PYTHON" -m policyik_sim.corrected_goals --single "$OUT/single.npz" --task_file data/eval_tasks.npz \

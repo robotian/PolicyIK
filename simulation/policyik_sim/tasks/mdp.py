@@ -10,26 +10,14 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import combine_frame_transforms, quat_apply, quat_conjugate, quat_mul
 
 
-def _quat_conjugate_wxyz(q: torch.Tensor) -> torch.Tensor:
-    return torch.cat([q[..., :1], -q[..., 1:]], dim=-1)
-
-
-def _quat_multiply_wxyz(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    aw, av = a[..., :1], a[..., 1:]
-    bw, bv = b[..., :1], b[..., 1:]
-    w = aw * bw - torch.sum(av * bv, dim=-1, keepdim=True)
-    v = aw * bv + bw * av + torch.linalg.cross(av, bv, dim=-1)
-    return torch.cat([w, v], dim=-1)
-
-
-def quat_error_rotvec_body(curr_wxyz: torch.Tensor, goal_wxyz: torch.Tensor) -> torch.Tensor:
-    """Shortest end-effector-frame rotation vector Log(R_curr^T R_goal)^vee."""
-    rel = _quat_multiply_wxyz(_quat_conjugate_wxyz(curr_wxyz), goal_wxyz)
+def quat_error_rotvec_body(curr_xyzw: torch.Tensor, goal_xyzw: torch.Tensor) -> torch.Tensor:
+    """Shortest end-effector-frame rotation vector Log(R_curr^T R_goal)^vee (quaternions in Isaac Lab 3's xyzw)."""
+    rel = quat_mul(quat_conjugate(curr_xyzw), goal_xyzw)
     rel = rel / torch.linalg.norm(rel, dim=-1, keepdim=True).clamp(min=1e-12)
-    rel = torch.where(rel[..., :1] < 0.0, -rel, rel)
-    vec = rel[..., 1:]
+    rel = torch.where(rel[..., 3:] < 0.0, -rel, rel)
+    vec = rel[..., :3]
     nv = torch.linalg.norm(vec, dim=-1, keepdim=True)
-    angle = 2.0 * torch.atan2(nv, rel[..., :1].clamp(min=0.0))
+    angle = 2.0 * torch.atan2(nv, rel[..., 3:].clamp(min=0.0))
     scale = torch.where(nv > 1e-8, angle / nv, torch.full_like(nv, 2.0))
     return vec * scale
 
@@ -45,11 +33,11 @@ def keypoint_offset_obs(env, command_name: str, asset_cfg: SceneEntityCfg, kp_si
     asset = env.scene[asset_cfg.name]
     command = env.command_manager.get_command(command_name)
     des_pos_b, des_quat_b = command[:, :3], command[:, 3:7]
-    root_pos_w, root_quat_w = asset.data.root_pos_w, asset.data.root_quat_w
+    root_pos_w, root_quat_w = asset.data.root_pos_w.torch, asset.data.root_quat_w.torch
     des_pos_w, _ = combine_frame_transforms(root_pos_w, root_quat_w, des_pos_b)
     des_quat_w = quat_mul(root_quat_w, des_quat_b)
-    curr_pos_w = asset.data.body_pos_w[:, asset_cfg.body_ids[0]]
-    curr_quat_w = asset.data.body_quat_w[:, asset_cfg.body_ids[0]]
+    curr_pos_w = asset.data.body_pos_w.torch[:, asset_cfg.body_ids[0]]
+    curr_quat_w = asset.data.body_quat_w.torch[:, asset_cfg.body_ids[0]]
     offs = torch.eye(3, device=curr_pos_w.device, dtype=curr_pos_w.dtype) * kp_size
     root_quat_inv = quat_conjugate(root_quat_w)
     out = []
@@ -74,10 +62,10 @@ def keypoint_error_tanh(env, std: float, command_name: str, asset_cfg: SceneEnti
     asset = env.scene[asset_cfg.name]
     command = env.command_manager.get_command(command_name)
     des_pos_b, des_quat_b = command[:, :3], command[:, 3:7]
-    des_pos_w, _ = combine_frame_transforms(asset.data.root_pos_w, asset.data.root_quat_w, des_pos_b)
-    des_quat_w = quat_mul(asset.data.root_quat_w, des_quat_b)
-    curr_pos_w = asset.data.body_pos_w[:, asset_cfg.body_ids[0]]
-    curr_quat_w = asset.data.body_quat_w[:, asset_cfg.body_ids[0]]
+    des_pos_w, _ = combine_frame_transforms(asset.data.root_pos_w.torch, asset.data.root_quat_w.torch, des_pos_b)
+    des_quat_w = quat_mul(asset.data.root_quat_w.torch, des_quat_b)
+    curr_pos_w = asset.data.body_pos_w.torch[:, asset_cfg.body_ids[0]]
+    curr_quat_w = asset.data.body_quat_w.torch[:, asset_cfg.body_ids[0]]
     offs = _keypoint_offsets(kp_size, zero_sum, curr_pos_w.device, curr_pos_w.dtype)
     errs = []
     for i in range(offs.shape[0]):
@@ -93,10 +81,10 @@ def ee_position_error_obs(env, command_name: str, asset_cfg: SceneEntityCfg, d0:
     """clip(R_ee^T (p_goal - p_ee) / d0, -1, 1)."""
     asset = env.scene[asset_cfg.name]
     command = env.command_manager.get_command(command_name)
-    root_pos_w, root_quat_w = asset.data.root_pos_w, asset.data.root_quat_w
+    root_pos_w, root_quat_w = asset.data.root_pos_w.torch, asset.data.root_quat_w.torch
     des_pos_w, _ = combine_frame_transforms(root_pos_w, root_quat_w, command[:, :3])
-    curr_pos_w = asset.data.body_pos_w[:, asset_cfg.body_ids[0]]
-    curr_quat_w = asset.data.body_quat_w[:, asset_cfg.body_ids[0]]
+    curr_pos_w = asset.data.body_pos_w.torch[:, asset_cfg.body_ids[0]]
+    curr_quat_w = asset.data.body_quat_w.torch[:, asset_cfg.body_ids[0]]
     err_body = quat_apply(quat_conjugate(curr_quat_w), des_pos_w - curr_pos_w)
     return torch.clamp(err_body / d0, -1.0, 1.0)
 
@@ -105,9 +93,9 @@ def ee_orientation_error_obs(env, command_name: str, asset_cfg: SceneEntityCfg, 
     """clip(Log(R_ee^T R_goal)^vee / d0_rad, -1, 1)."""
     asset = env.scene[asset_cfg.name]
     command = env.command_manager.get_command(command_name)
-    root_quat_w = asset.data.root_quat_w
+    root_quat_w = asset.data.root_quat_w.torch
     des_quat_w = quat_mul(root_quat_w, command[:, 3:7])
-    curr_quat_w = asset.data.body_quat_w[:, asset_cfg.body_ids[0]]
+    curr_quat_w = asset.data.body_quat_w.torch[:, asset_cfg.body_ids[0]]
     phi = quat_error_rotvec_body(curr_quat_w, des_quat_w)
     return torch.clamp(phi / d0_rad, -1.0, 1.0)
 
@@ -123,11 +111,11 @@ def tolerance_error_state(env, command_name: str, asset_cfg: SceneEntityCfg, tau
     marks those environments."""
     asset = env.scene[asset_cfg.name]
     command = env.command_manager.get_command(command_name)
-    root_pos_w, root_quat_w = asset.data.root_pos_w, asset.data.root_quat_w
+    root_pos_w, root_quat_w = asset.data.root_pos_w.torch, asset.data.root_quat_w.torch
     des_pos_w, _ = combine_frame_transforms(root_pos_w, root_quat_w, command[:, :3])
     des_quat_w = quat_mul(root_quat_w, command[:, 3:7])
-    curr_pos_w = asset.data.body_pos_w[:, asset_cfg.body_ids[0]]
-    curr_quat_w = asset.data.body_quat_w[:, asset_cfg.body_ids[0]]
+    curr_pos_w = asset.data.body_pos_w.torch[:, asset_cfg.body_ids[0]]
+    curr_quat_w = asset.data.body_quat_w.torch[:, asset_cfg.body_ids[0]]
     e_p = torch.norm(des_pos_w - curr_pos_w, dim=-1)
     e_r = torch.norm(quat_error_rotvec_body(curr_quat_w, des_quat_w), dim=-1)
     rho = torch.maximum(e_p / tau_p, e_r / tau_r_rad)
@@ -210,8 +198,8 @@ def joint_margin_cost(env, asset_cfg: SceneEntityCfg, command_name: str = "", rh
     applied only while rho > rho_gate when rho_gate > 0."""
     asset = env.scene[asset_cfg.name]
     ids = asset_cfg.joint_ids
-    q = asset.data.joint_pos[:, ids]
-    lim = asset.data.soft_joint_pos_limits[:, ids, :]
+    q = asset.data.joint_pos.torch[:, ids]
+    lim = asset.data.soft_joint_pos_limits.torch[:, ids, :]
     lo, hi = lim[..., 0], lim[..., 1]
     rng = (hi - lo).clamp(min=1e-6)
     margin = (torch.minimum(q - lo, hi - q) / rng).min(dim=-1).values
@@ -228,4 +216,4 @@ def command_state_obs(env, action_name: str = "arm_action") -> torch.Tensor:
     tgt = getattr(term, "_int_target", None)
     if tgt is None:
         raise RuntimeError(f"command_state_obs: action term {action_name!r} keeps no joint reference")
-    return tgt - term._asset.data.joint_pos[:, term._joint_ids]
+    return tgt - term._asset.data.joint_pos.torch[:, term._joint_ids]

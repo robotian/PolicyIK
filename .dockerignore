@@ -1,0 +1,7 @@
+.git
+**/__pycache__
+**/*.pyc
+hardware
+simulation/third_party
+simulation/logs
+simulation/outputs

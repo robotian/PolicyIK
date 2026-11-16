@@ -19,7 +19,7 @@ class AccumulatedJointReferenceAction(JointPositionAction):
         super().__init__(cfg, env)
         body_ids, _ = self._asset.find_bodies(cfg.ee_body_name)
         self._ee_body_idx = int(body_ids[0])
-        self._int_target = self._asset.data.joint_pos[:, self._joint_ids].clone()   # joint reference z
+        self._int_target = self._asset.data.joint_pos.torch[:, self._joint_ids].clone()   # joint reference z
         self._needs_anchor = torch.ones(env.num_envs, dtype=torch.bool, device=env.device)
 
     def reset(self, env_ids=None) -> None:
@@ -33,13 +33,13 @@ class AccumulatedJointReferenceAction(JointPositionAction):
     def _gain(self) -> torch.Tensor:
         """Per-environment gain g(e_p, e_R) in [g_min, 1]."""
         cmd = self._env.command_manager.get_command(self.cfg.command_name)
-        des_pos_w, _ = combine_frame_transforms(self._asset.data.root_pos_w, self._asset.data.root_quat_w, cmd[:, :3])
-        ee_pos_w = self._asset.data.body_pos_w[:, self._ee_body_idx]
+        des_pos_w, _ = combine_frame_transforms(self._asset.data.root_pos_w.torch, self._asset.data.root_quat_w.torch, cmd[:, :3])
+        ee_pos_w = self._asset.data.body_pos_w.torch[:, self._ee_body_idx]
         d = torch.norm(ee_pos_w - des_pos_w, dim=1)
         t = ((d - self.cfg.d_lo) / max(self.cfg.d_hi - self.cfg.d_lo, 1e-6)).clamp(0.0, 1.0)
         gain = self.cfg.g_min + (1.0 - self.cfg.g_min) * t
-        des_quat_w = quat_mul(self._asset.data.root_quat_w, cmd[:, 3:7])
-        e_r = quat_error_magnitude(self._asset.data.body_quat_w[:, self._ee_body_idx], des_quat_w)
+        des_quat_w = quat_mul(self._asset.data.root_quat_w.torch, cmd[:, 3:7])
+        e_r = quat_error_magnitude(self._asset.data.body_quat_w.torch[:, self._ee_body_idx], des_quat_w)
         lo = math.radians(self.cfg.ori_lo_deg)
         hi = math.radians(self.cfg.ori_hi_deg)
         t_r = ((e_r - lo) / max(hi - lo, 1e-9)).clamp(0.0, 1.0)
@@ -48,12 +48,12 @@ class AccumulatedJointReferenceAction(JointPositionAction):
     def process_actions(self, actions: torch.Tensor) -> None:
         self._raw_actions[:] = actions
         gain = self._gain().unsqueeze(-1)
-        q_now = self._asset.data.joint_pos[:, self._joint_ids]
+        q_now = self._asset.data.joint_pos.torch[:, self._joint_ids]
         if bool(self._needs_anchor.any()):
             m = self._needs_anchor
             self._int_target = torch.where(m.unsqueeze(-1), q_now, self._int_target)
             self._needs_anchor = torch.zeros_like(self._needs_anchor)
-        lim = self._asset.data.soft_joint_pos_limits[:, self._joint_ids]
+        lim = self._asset.data.soft_joint_pos_limits.torch[:, self._joint_ids]
         delta = gain * self._raw_actions * self._scale
         self._int_target = torch.clamp(self._int_target + delta, lim[..., 0], lim[..., 1])
         self._processed_actions = self._int_target

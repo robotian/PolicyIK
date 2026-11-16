@@ -3,25 +3,6 @@
 import argparse
 import sys
 
-from isaaclab.app import AppLauncher
-
-parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-parser.add_argument("--task", default="PolicyIK-OpenArm-Play")
-parser.add_argument("--checkpoint", required=True)
-parser.add_argument("--task_file", required=True, help="tasks (.npz with q_start, goal_pos, goal_quat)")
-parser.add_argument("--output", required=True, help="per-step errors and end-effector poses (.npz)")
-parser.add_argument("--num_envs", type=int, default=1024)
-parser.add_argument("--eval_seed", type=int, default=123)
-parser.add_argument("--steps", type=int, default=160)
-parser.add_argument("--transient_seed", type=int, default=-1, help="transient-goal attempt with this seed (-1: off)")
-AppLauncher.add_app_launcher_args(parser)
-args_cli, hydra_args = parser.parse_known_args()
-sys.argv = [sys.argv[0]] + hydra_args
-
-app_launcher = AppLauncher(args_cli)
-simulation_app = app_launcher.app
-
-"""Everything below runs after Isaac Sim is up."""
 import gymnasium as gym
 import numpy as np
 import torch
@@ -29,6 +10,7 @@ from rl_games.common import env_configurations, vecenv
 from rl_games.common.player import BasePlayer
 from rl_games.torch_runner import Runner
 
+from isaaclab.app import add_launcher_args, launch_simulation
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.math import (
@@ -40,16 +22,28 @@ from isaaclab.utils.math import (
 from isaaclab_rl.rl_games import RlGamesVecEnvWrapper
 
 import isaaclab_tasks  # noqa: F401
-from isaaclab_tasks.utils.hydra import hydra_task_config
+from isaaclab_tasks.utils import resolve_task_config
 
 import policyik_sim.tasks  # noqa: F401
+
+parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+parser.add_argument("--task", default="PolicyIK-OpenArm-Play")
+parser.add_argument("--checkpoint", required=True)
+parser.add_argument("--task_file", required=True, help="tasks (.npz with q_start, goal_pos, goal_quat)")
+parser.add_argument("--output", required=True, help="per-step errors and end-effector poses (.npz)")
+parser.add_argument("--num_envs", type=int, default=1024)
+parser.add_argument("--eval_seed", type=int, default=123)
+parser.add_argument("--steps", type=int, default=160)
+parser.add_argument("--transient_seed", type=int, default=-1, help="transient-goal attempt with this seed (-1: off)")
+add_launcher_args(parser)
+args_cli, hydra_args = parser.parse_known_args()
+sys.argv = [sys.argv[0]] + hydra_args
 
 FREEZE = 1.0e6            # disables goal resampling during an attempt
 ARM_EXPR = ["openarm_joint[1-7]"]
 TRANSIENT_STEPS, TRANSIENT_OFFSET_M, TRANSIENT_ROT_DEG = 40, 0.30, 90.0
 
 
-@hydra_task_config(args_cli.task, "rl_games_cfg_entry_point")
 def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: dict):
     env_cfg.scene.num_envs = args_cli.num_envs
     env_cfg.seed = args_cli.eval_seed
@@ -87,18 +81,18 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: dict):
         return pos_term.func(env.unwrapped, **pos_term.params).detach()
 
     def ori_err_fn() -> torch.Tensor:
-        ee_quat = cmd.robot.data.body_quat_w[:, cmd.body_idx]
+        ee_quat = cmd.robot.data.body_quat_w.torch[:, cmd.body_idx]
         return quat_error_magnitude(ee_quat, cmd.pose_command_w[:, 3:]).detach()
 
     def refresh_manual_goal_world() -> None:
         """Synchronize the cached world-frame command after a direct base-frame command write."""
         cmd.pose_command_w[:, :3], cmd.pose_command_w[:, 3:] = combine_frame_transforms(
-            robot.data.root_pos_w, robot.data.root_quat_w, cmd.pose_command_b[:, :3], cmd.pose_command_b[:, 3:])
+            robot.data.root_pos_w.torch, robot.data.root_quat_w.torch, cmd.pose_command_b[:, :3], cmd.pose_command_b[:, 3:])
 
     d = np.load(args_cli.task_file)
     q_start = d["q_start"]
     goal_pos = np.asarray(d["goal_pos"], dtype=np.float32)
-    goal_quat = np.asarray(d["goal_quat"], dtype=np.float32)
+    goal_quat = np.asarray(d["goal_quat"], dtype=np.float32)[:, [1, 2, 3, 0]]   # task files are wxyz, Isaac Lab 3 xyzw
     m_total = q_start.shape[0]
     goals = np.concatenate([goal_pos, goal_quat], axis=1).astype(np.float32)
     transient = args_cli.transient_seed >= 0
@@ -157,7 +151,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: dict):
             if isinstance(obs, dict):
                 obs = obs["obs"]
             # start state of the task: written after the reset, zero velocity
-            robot.write_joint_state_to_sim(q_b, torch.zeros_like(q_b), joint_ids=arm_ids)
+            robot.write_joint_state_to_sim_index(position=q_b, velocity=torch.zeros_like(q_b), joint_ids=arm_ids)
             cmd.cfg.resampling_time_range = (FREEZE, FREEZE)
             cmd.time_left.fill_(FREEZE)
             _pin(0)
@@ -173,19 +167,21 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: dict):
                 obs, _, _, _ = env.step(actions)
                 d_pos[sl, t] = pos_err_fn()[:m].cpu().numpy()
                 d_ori[sl, t] = ori_err_fn()[:m].cpu().numpy()
-                d_ee_pos[sl, t] = cmd.robot.data.body_pos_w[:, cmd.body_idx][:m].cpu().numpy()
-                d_ee_quat[sl, t] = cmd.robot.data.body_quat_w[:, cmd.body_idx][:m].cpu().numpy()
+                d_ee_pos[sl, t] = cmd.robot.data.body_pos_w.torch[:, cmd.body_idx][:m].cpu().numpy()
+                d_ee_quat[sl, t] = cmd.robot.data.body_quat_w.torch[:, cmd.body_idx][:m].cpu().numpy()
                 if t == 0:
                     d_goal_pos[sl] = cmd.pose_command_w[:, :3][:m].cpu().numpy()
                     d_goal_quat[sl] = cmd.pose_command_w[:, 3:][:m].cpu().numpy()
             print(f"[evaluate] tasks {sl.start}-{sl.stop} of {m_total} done", flush=True)
 
-    np.savez(args_cli.output, pos_t=d_pos, ori_t=d_ori, ee_pos_t=d_ee_pos, ee_quat_t=d_ee_quat,
-             goal_pos_w=d_goal_pos, goal_quat_w=d_goal_quat)
+    # outputs keep the wxyz convention of the data files (metrics.py and corrected_goals.py read wxyz)
+    np.savez(args_cli.output, pos_t=d_pos, ori_t=d_ori, ee_pos_t=d_ee_pos, ee_quat_t=d_ee_quat[..., [3, 0, 1, 2]],
+             goal_pos_w=d_goal_pos, goal_quat_w=d_goal_quat[:, [3, 0, 1, 2]])
     print(f"[evaluate] wrote {args_cli.output}", flush=True)
     env.close()
 
 
 if __name__ == "__main__":
-    main()
-    simulation_app.close()
+    env_cfg, agent_cfg = resolve_task_config(args_cli.task, "rl_games_cfg_entry_point")
+    with launch_simulation(env_cfg, args_cli):
+        main(env_cfg, agent_cfg)
